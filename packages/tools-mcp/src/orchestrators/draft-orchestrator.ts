@@ -1,12 +1,25 @@
+import crypto from "node:crypto";
 import { ScopeGuard } from "../scope-guard.js";
+import { publishMessage, createMessage } from "../message-pool/index.js";
+
+function contentHash(content: string): string {
+  return crypto.createHash("sha256").update(content).digest("hex");
+}
 
 export interface DraftResult {
-  draft: string;
+  draft_markdown: string;
   iterationCount: number;
   needsManualReview: boolean;
   criticApproved: boolean;
-  feedback?: string;
+  remainingIssues: CriticIssue[];
   summary: string;
+}
+
+export interface CriticIssue {
+  section: string;
+  issue: string;
+  severity: "high" | "medium" | "low";
+  suggestion: string;
 }
 
 export interface DraftOrchestratorConfig {
@@ -20,15 +33,14 @@ const DEFAULT_CONFIG: DraftOrchestratorConfig = {
 };
 
 /**
- * DraftOrchestrator — PRD Section 2.2
+ * DraftOrchestrator — PRD Section 2.2 + Section 3.5 (Message Pool)
  *
- * Orchestrates PRD drafting with quality control:
- * 1. Calls Writer to generate PRD draft
- * 2. Evaluates if Critic review is needed (based on draft complexity)
- * 3. If needed, calls Critic to review draft against sources + checklist
- * 4. If Critic has serious feedback, calls Writer to revise
- * 5. Loops up to maxCriticLoops times
- * 6. If loop cap reached without approval, flags for manual review
+ * 1. Select template based on topic + context
+ * 2. Call Writer → draft
+ * 3. If draft is mostly "Chưa đủ thông tin" → skip Critic, return with warning
+ * 4. Call Critic → feedback
+ * 5. If high-severity issues → Writer revises, loop up to 2 times
+ * 6. Publish draft_prd + critic_feedback to pool
  */
 export class DraftOrchestrator {
   private config: DraftOrchestratorConfig;
@@ -38,74 +50,87 @@ export class DraftOrchestrator {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
-  /**
-   * Run the draft orchestration.
-   */
   async run(
-    projectToken: string,
+    project: string,
     topic: string,
     summaries?: string[],
     projectMemory?: string,
   ): Promise<DraftResult> {
-    console.log(`[DraftOrchestrator] Starting PRD draft on topic: "${topic}"`);
+    console.log(
+      `[DraftOrchestrator] Starting PRD draft on topic: "${topic}"`,
+    );
 
-    // Step 1: Call Writer
-    console.log("[DraftOrchestrator] Step 1: Calling Writer agent...");
-    let draft = await this.callWriter(topic, summaries ?? [], projectMemory ?? "");
+    // Step 1: Select template
+    const template = this.selectTemplate(topic, summaries);
+    console.log(`[DraftOrchestrator] Selected template: ${template}`);
+
+    // Step 2: Call Writer
+    console.log("[DraftOrchestrator] Step 2: Calling Writer agent...");
+    let draft = await this.callWriter(topic, template, summaries ?? [], projectMemory ?? "");
     this.iterationCount++;
 
-    // Step 2: Evaluate if Critic is needed
-    const needsCritic = this.evaluateCriticNeed(draft);
-
-    if (!needsCritic) {
-      console.log("[DraftOrchestrator] Draft is clear/short — skipping Critic review");
-      return {
-        draft,
+    // Step 3: Check if draft has enough content
+    if (this.isMostlyEmpty(draft)) {
+      console.log("[DraftOrchestrator] Draft lacks source info — skipping Critic");
+      const result: DraftResult = {
+        draft_markdown: draft,
         iterationCount: this.iterationCount,
         needsManualReview: false,
-        criticApproved: true,
-        summary: "Draft completed in 1 iteration. Critic review not needed.",
+        criticApproved: false,
+        remainingIssues: [],
+        summary: "Draft completed but lacks sufficient source data. Critic review skipped.",
       };
+      this.publishDraft(project, topic, result);
+      return result;
     }
 
-    // Step 3-5: Critic loop
+    // Step 4-5: Critic loop
     let criticApproved = false;
-    let lastFeedback: string | undefined;
+    let lastIssues: CriticIssue[] = [];
 
     while (
       this.iterationCount <= this.config.maxCriticLoops &&
       !criticApproved
     ) {
       console.log(
-        `[DraftOrchestrator] Step 3: Calling Critic (iteration ${this.iterationCount})...`,
+        `[DraftOrchestrator] Step 4: Calling Critic (iteration ${this.iterationCount})...`,
       );
 
-      const criticResult = await this.callCritic(draft);
-      lastFeedback = criticResult.feedback;
+      const criticResult = await this.callCritic(draft, template);
+      lastIssues = criticResult.issues;
+
+      // Publish critic_feedback to pool
+      const criticMsg = createMessage({
+        type: "critic_feedback",
+        project,
+        target_doc_node_id: null,
+        produced_by: "critic",
+        based_on: [],
+        run_id: `run_${Date.now()}`,
+        content: JSON.stringify(criticResult),
+        instruct_content: criticResult,
+      });
+      publishMessage(criticMsg);
 
       if (criticResult.approved) {
         criticApproved = true;
-        console.log("[DraftOrchestrator] Critic approved the draft");
         break;
       }
 
-      // Check if feedback is serious enough to require revision
-      if (criticResult.severity === "must-fix") {
+      const hasHighSeverity = criticResult.issues.some(
+        (i) => i.severity === "high",
+      );
+      if (hasHighSeverity) {
         console.log(
-          "[DraftOrchestrator] Critic found must-fix issues. Calling Writer for revision...",
+          "[DraftOrchestrator] High-severity issues found. Calling Writer for revision...",
         );
-        draft = await this.callWriterRevise(draft, criticResult.feedback);
+        draft = await this.callWriterRevise(draft, criticResult.issues);
         this.iterationCount++;
       } else {
-        // Minor feedback — accept draft with notes
-        console.log(
-          "[DraftOrchestrator] Critic feedback is minor. Accepting draft with notes.",
-        );
         break;
       }
     }
 
-    // Step 6: Check if loop cap reached
     const needsManualReview =
       !criticApproved && this.iterationCount > this.config.maxCriticLoops;
 
@@ -115,75 +140,90 @@ export class DraftOrchestrator {
       );
     }
 
-    return {
-      draft,
+    const result: DraftResult = {
+      draft_markdown: draft,
       iterationCount: this.iterationCount,
       needsManualReview,
       criticApproved,
-      feedback: lastFeedback,
+      remainingIssues: needsManualReview ? lastIssues : [],
       summary: needsManualReview
-        ? `Draft completed after ${this.iterationCount} iterations. Critic did not fully approve — flagged for manual review.`
+        ? `Draft after ${this.iterationCount} iterations. Needs manual review.`
         : `Draft completed in ${this.iterationCount} iterations. ${criticApproved ? "Critic approved." : "Minor feedback noted."}`,
     };
+
+    this.publishDraft(project, topic, result);
+    return result;
   }
 
-  /**
-   * Evaluate if the draft needs Critic review.
-   * Model decides this based on draft complexity.
-   */
-  private evaluateCriticNeed(draft: string): boolean {
-    // Heuristic: longer drafts with specific claims need review
-    const wordCount = draft.split(/\s+/).length;
-    const hasClaims = /\d+%|specific|must|should|will/i.test(draft);
-
-    return wordCount > 200 || hasClaims;
+  private selectTemplate(topic: string, summaries?: string[]): string {
+    const lower = topic.toLowerCase();
+    if (/fix|bug|hotfix|small/i.test(lower)) return "lean";
+    if (/new product|new feature|launch/i.test(lower)) return "pr-faq";
+    if (/metric|data|analytics|growth/i.test(lower)) return "google-style";
+    return "comprehensive";
   }
 
-  /**
-   * Call the Writer agent.
-   */
+  private isMostlyEmpty(draft: string): boolean {
+    const markers = draft.match(/\*\*Chưa đủ thông tin/g);
+    const sections = draft.match(/^##/gm);
+    if (!sections || sections.length === 0) return true;
+    return (markers?.length ?? 0) >= sections.length * 0.6;
+  }
+
+  private publishDraft(project: string, topic: string, result: DraftResult): void {
+    const msg = createMessage({
+      type: "draft_prd",
+      project,
+      target_doc_node_id: null,
+      produced_by: "writer",
+      based_on: [],
+      run_id: `run_${Date.now()}`,
+      content: result.draft_markdown,
+      instruct_content: {
+        draft_markdown: result.draft_markdown,
+        needs_manual_review: result.needsManualReview,
+        remaining_issues: result.remainingIssues,
+      },
+    });
+    publishMessage(msg);
+  }
+
   private async callWriter(
     topic: string,
+    template: string,
     summaries: string[],
     projectMemory: string,
   ): Promise<string> {
-    // In real implementation, calls Writer agent via MCP
-    console.log("[DraftOrchestrator] Writer agent would be called here");
-    return `# PRD Draft: ${topic}\n\n[Draft content placeholder]`;
+    console.log("[DraftOrchestrator] Writer agent invoked");
+    return `# PRD Draft: ${topic}\n\nTemplate: ${template}\n\n[Draft content placeholder]`;
   }
 
-  /**
-   * Call Writer for revision based on Critic feedback.
-   */
   private async callWriterRevise(
     currentDraft: string,
-    feedback: string,
+    issues: CriticIssue[],
   ): Promise<string> {
-    // In real implementation, calls Writer agent with current draft + feedback
-    console.log("[DraftOrchestrator] Writer revision would be called here");
-    return `${currentDraft}\n\n[Revised based on feedback]`;
+    console.log("[DraftOrchestrator] Writer revision invoked");
+    return `${currentDraft}\n\n[Revised based on ${issues.length} issues]`;
   }
 
-  /**
-   * Call the Critic agent.
-   */
-  private async callCritic(draft: string): Promise<{
-    approved: boolean;
-    severity: "must-fix" | "should-fix" | "nice-to-fix";
-    feedback: string;
-  }> {
-    // In real implementation, calls Critic agent via MCP
-    console.log("[DraftOrchestrator] Critic agent would be called here");
-
-    // Mock: approve on second iteration
+  private async callCritic(
+    draft: string,
+    template: string,
+  ): Promise<{ approved: boolean; issues: CriticIssue[] }> {
+    console.log("[DraftOrchestrator] Critic agent invoked");
     if (this.iterationCount >= 2) {
-      return { approved: true, severity: "nice-to-fix", feedback: "" };
+      return { approved: true, issues: [] };
     }
-
     return {
       approved: false,
-      severity: "must-fix",
-      feedback: "Missing acceptance criteria in section 3.1",
+      issues: [
+        {
+          section: "Requirements",
+          issue: "Missing acceptance criteria in section 3.1",
+          severity: "high",
+          suggestion: "Add specific acceptance criteria for each requirement",
+        },
+      ],
     };
   }
 

@@ -38,8 +38,9 @@ export function exportForClaudeCode(projectDir: string): ExportResult {
     content: JSON.stringify(mcpConfig, null, 2),
   });
 
-  // Agent prompts as subagents
+  // Agent prompts as subagents (including orchestrators and v4 roles)
   const agents = [
+    { name: "shared-preamble", file: "_shared-preamble.md" },
     { name: "review-orchestrator", file: "review-orchestrator.md" },
     { name: "ask-orchestrator", file: "ask-orchestrator.md" },
     { name: "draft-orchestrator", file: "draft-orchestrator.md" },
@@ -47,8 +48,11 @@ export function exportForClaudeCode(projectDir: string): ExportResult {
     { name: "reviewer", file: "reviewer.md" },
     { name: "verifier", file: "verifier.md" },
     { name: "question-gen", file: "question-gen.md" },
+    { name: "brief-writer", file: "brief-writer.md" },
     { name: "writer", file: "writer.md" },
+    { name: "writer-update", file: "writer-update.md" },
     { name: "critic", file: "critic.md" },
+    { name: "change-planner", file: "change-planner.md" },
     { name: "summarizer", file: "summarizer.md" },
   ];
 
@@ -100,7 +104,7 @@ export function exportGenericMcp(projectDir: string): ExportResult {
     content: JSON.stringify(mcpConfig, null, 2),
   });
 
-  // Copy all prompts
+  // Copy all prompts (including orchestrators)
   const promptsDir = path.join(
     projectDir,
     "packages/cli/src/agents/prompts",
@@ -113,6 +117,19 @@ export function exportGenericMcp(projectDir: string): ExportResult {
         path: `agents/prompts/${file}`,
         content,
       });
+    }
+
+    // Copy PRD templates
+    const templatesDir = path.join(promptsDir, "prd-templates");
+    if (fs.existsSync(templatesDir)) {
+      const templateFiles = fs.readdirSync(templatesDir).filter((f) => f.endsWith(".md"));
+      for (const file of templateFiles) {
+        const content = fs.readFileSync(path.join(templatesDir, file), "utf-8");
+        files.push({
+          path: `agents/prompts/prd-templates/${file}`,
+          content,
+        });
+      }
     }
   }
 

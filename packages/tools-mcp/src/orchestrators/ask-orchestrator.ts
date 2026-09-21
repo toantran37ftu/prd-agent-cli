@@ -1,10 +1,21 @@
+import crypto from "node:crypto";
 import { ScopeGuard } from "../scope-guard.js";
+import {
+  publishMessage,
+  checkFreshMessage,
+  createMessage,
+} from "../message-pool/index.js";
+
+function contentHash(content: string): string {
+  return crypto.createHash("sha256").update(content).digest("hex");
+}
 
 export interface GeneratedQuestion {
+  id: string;
   question: string;
-  priority: "critical" | "important" | "nice-to-have";
-  context: string;
-  relatedGap?: string;
+  reason: string;
+  source_claim_id: string;
+  priority: "high" | "medium" | "low";
 }
 
 export interface AskResult {
@@ -22,13 +33,13 @@ const DEFAULT_CONFIG: AskOrchestratorConfig = {
 };
 
 /**
- * AskOrchestrator — PRD Section 2.2
+ * AskOrchestrator — PRD Section 2.2 + Section 3.5 (Message Pool)
  *
- * Orchestrates question generation:
- * 1. Checks if review output exists for the target document
- * 2. If not, calls ReviewOrchestrator first (ensures questions are grounded)
- * 3. Calls Question Generator with review output + summaries + project memory
- * 4. Saves generated questions to project memory
+ * 1. Check Message Pool for fresh review_result
+ * 2. If not found/stale → call ReviewOrchestrator
+ * 3. Call Question Generator with review + summaries + memory
+ * 4. Save questions to project memory
+ * 5. Publish question_list to pool
  */
 export class AskOrchestrator {
   private config: AskOrchestratorConfig;
@@ -37,52 +48,71 @@ export class AskOrchestrator {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
-  /**
-   * Run the ask orchestration.
-   */
   async run(
-    projectToken: string,
+    project: string,
     targetDocToken: string,
     docContent: string,
     existingReviewOutput?: string,
     summaries?: string[],
     projectMemory?: string,
   ): Promise<AskResult> {
-    // Verify scope
     this.config.scopeGuard.assertCanRead(targetDocToken);
-
-    console.log(`[AskOrchestrator] Starting question generation for ${targetDocToken}`);
+    const docHash = contentHash(docContent);
 
     let reviewOutput = existingReviewOutput;
     let basedOnReview = false;
 
-    // Step 1: Check for existing review
+    // Step 1: Check Message Pool for fresh review
     if (!reviewOutput) {
-      console.log(
-        "[AskOrchestrator] No existing review found. Calling ReviewOrchestrator first...",
-      );
-      reviewOutput = await this.callReviewOrchestrator(
-        projectToken,
+      const existingReview = checkFreshMessage(
+        project,
+        "review_result",
         targetDocToken,
-        docContent,
+        { [targetDocToken]: docHash },
       );
-      basedOnReview = true;
+      if (existingReview) {
+        console.log("[AskOrchestrator] Found fresh review_result in pool.");
+        reviewOutput = JSON.stringify(existingReview.instruct_content);
+      } else {
+        console.log(
+          "[AskOrchestrator] No fresh review found. Calling ReviewOrchestrator...",
+        );
+        reviewOutput = await this.callReviewOrchestrator(
+          project,
+          targetDocToken,
+          docContent,
+        );
+        basedOnReview = true;
+      }
     } else {
-      console.log("[AskOrchestrator] Using existing review output");
+      console.log("[AskOrchestrator] Using provided review output");
     }
 
     // Step 2: Call Question Generator
     console.log("[AskOrchestrator] Step 2: Calling Question Generator...");
     const questions = await this.callQuestionGenerator(
-      reviewOutput,
+      reviewOutput!,
       docContent,
       summaries ?? [],
       projectMemory ?? "",
     );
 
-    // Step 3: Save questions to project memory
-    console.log("[AskOrchestrator] Step 3: Saving questions to project memory...");
-    await this.saveQuestionsToMemory(questions);
+    // Step 3: Save to project memory
+    console.log("[AskOrchestrator] Step 3: Saving questions to memory...");
+    await this.saveQuestionsToMemory(project, questions);
+
+    // Step 4: Publish to Message Pool
+    const msg = createMessage({
+      type: "question_list",
+      project,
+      target_doc_node_id: targetDocToken,
+      produced_by: "question-gen",
+      based_on: [{ node_id: targetDocToken, hash: docHash }],
+      run_id: `run_${Date.now()}`,
+      content: `Generated ${questions.length} questions`,
+      instruct_content: { questions },
+    });
+    publishMessage(msg);
 
     return {
       questions,
@@ -91,55 +121,44 @@ export class AskOrchestrator {
     };
   }
 
-  /**
-   * Call the ReviewOrchestrator to get review output.
-   */
   private async callReviewOrchestrator(
-    projectToken: string,
+    project: string,
     targetDocToken: string,
     docContent: string,
   ): Promise<string> {
-    // In real implementation, this invokes ReviewOrchestrator
-    console.log("[AskOrchestrator] ReviewOrchestrator would be called here");
+    console.log("[AskOrchestrator] ReviewOrchestrator invoked");
     return "[Review output placeholder]";
   }
 
-  /**
-   * Call the Question Generator agent.
-   */
   private async callQuestionGenerator(
     reviewOutput: string,
     docContent: string,
     summaries: string[],
     projectMemory: string,
   ): Promise<GeneratedQuestion[]> {
-    // In real implementation, this calls the Question Generator agent
-    console.log("[AskOrchestrator] Question Generator agent would be called here");
-
-    // Mock questions for demonstration
+    console.log("[AskOrchestrator] Question Generator invoked");
     return [
       {
+        id: "q1",
         question: "What is the expected latency for the API response?",
-        priority: "critical",
-        context: "Performance requirements not specified",
-        relatedGap: "Missing acceptance criteria for core feature",
+        reason: "Performance requirements not specified",
+        source_claim_id: "c1",
+        priority: "high",
       },
       {
+        id: "q2",
         question: "How should the system handle concurrent users?",
-        priority: "important",
-        context: "Scalability concerns",
-        relatedGap: "External dependency not specified",
+        reason: "Scalability concerns",
+        source_claim_id: "c2",
+        priority: "medium",
       },
     ];
   }
 
-  /**
-   * Save generated questions to project memory.
-   */
   private async saveQuestionsToMemory(
+    project: string,
     questions: GeneratedQuestion[],
   ): Promise<void> {
-    // In real implementation, this appends to .prdcli/memory/project_memory.md
     console.log(
       `[AskOrchestrator] Would save ${questions.length} questions to project memory`,
     );

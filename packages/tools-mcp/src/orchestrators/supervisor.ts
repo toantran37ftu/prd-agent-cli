@@ -1,4 +1,8 @@
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { ScopeGuard } from "../scope-guard.js";
+import { listProjectMessages, type PoolMessage } from "../message-pool/index.js";
 
 export interface SupervisorAction {
   tool: string;
@@ -23,32 +27,47 @@ const DEFAULT_CONFIG: SupervisorConfig = {
   scopeGuard: new ScopeGuard(),
 };
 
+const RUNS_DIR = ".prdcli/runs";
+
 /**
- * Supervisor Agent — PRD Section 3
+ * Supervisor Agent — PRD Section 3 + Section 3.5 (Message Pool)
  *
- * Interprets natural language requests and orchestrates task orchestrators.
- * Does NOT implement review/draft logic itself — delegates to existing orchestrators.
- *
- * Constraints:
- * - Max 5 tool calls per session
- * - All write actions require user confirmation
- * - Cannot write outside current project scope
- * - Must log decision trace for debugging
+ * 1. Parse natural language goal
+ * 2. Query Message Pool for project status
+ * 3. Build execution plan
+ * 4. Execute with cap=5 tool calls
+ * 5. Write decision trace to .prdcli/runs/<timestamp>_agent-trace.md
  */
 export class Supervisor {
   private config: SupervisorConfig;
   private toolCallCount = 0;
   private actions: SupervisorAction[] = [];
   private traceLog: string[] = [];
+  private project?: string;
 
   constructor(config?: Partial<SupervisorConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
   /**
-   * Parse a natural language goal and determine which tasks to run.
-   * Returns an execution plan, does not execute.
+   * Get project status from Message Pool.
+   * Used by Supervisor to understand context before planning.
    */
+  getProjectStatus(project: string): {
+    hasReviews: boolean;
+    hasQuestions: boolean;
+    hasDrafts: boolean;
+    messages: PoolMessage[];
+  } {
+    const messages = listProjectMessages(project);
+    return {
+      hasReviews: messages.some((m) => m.type === "review_result"),
+      hasQuestions: messages.some((m) => m.type === "question_list"),
+      hasDrafts: messages.some((m) => m.type === "draft_prd"),
+      messages,
+    };
+  }
+
   async plan(
     goal: string,
     currentProject?: string,
@@ -61,14 +80,21 @@ export class Supervisor {
     needsClarification: boolean;
     clarificationQuestion?: string;
   }> {
+    this.project = currentProject;
     this.trace(`Planning for goal: "${goal}"`);
     this.trace(`Current project: ${currentProject ?? "none"}`);
 
-    // Parse intent from goal
+    // Query Message Pool for project context
+    if (currentProject) {
+      const status = this.getProjectStatus(currentProject);
+      this.trace(
+        `Project status: ${status.hasReviews ? "has reviews" : "no reviews"}, ${status.hasQuestions ? "has questions" : "no questions"}, ${status.hasDrafts ? "has drafts" : "no drafts"}`,
+      );
+    }
+
     const intent = this.parseIntent(goal);
     this.trace(`Parsed intent: ${JSON.stringify(intent)}`);
 
-    // If project not determined, ask
     if (!currentProject && intent.needsProject) {
       return {
         tasks: [],
@@ -78,19 +104,16 @@ export class Supervisor {
       };
     }
 
-    // Build task sequence
     const tasks: Array<{
       tool: string;
       args: Record<string, unknown>;
       order: number;
     }> = [];
-
     let order = 1;
 
     if (intent.needsSync) {
       tasks.push({ tool: "run_sync", args: {}, order: order++ });
     }
-
     if (intent.reviewDoc) {
       tasks.push({
         tool: "run_review",
@@ -98,7 +121,6 @@ export class Supervisor {
         order: order++,
       });
     }
-
     if (intent.askDoc) {
       tasks.push({
         tool: "run_ask",
@@ -106,7 +128,6 @@ export class Supervisor {
         order: order++,
       });
     }
-
     if (intent.draftTopic) {
       tasks.push({
         tool: "run_draft",
@@ -114,62 +135,95 @@ export class Supervisor {
         order: order++,
       });
     }
-
     if (intent.readMemory) {
       tasks.push({ tool: "read_project_memory", args: {}, order: order++ });
     }
-
     if (intent.readSummaries) {
       tasks.push({ tool: "read_summaries", args: {}, order: order++ });
     }
 
-    this.trace(`Planned ${tasks.length} tasks`);
+    // Enforce cap
+    if (tasks.length > this.config.maxToolCalls) {
+      this.trace(
+        `Plan exceeds cap (${tasks.length} > ${this.config.maxToolCalls}). Truncating.`,
+      );
+      tasks.length = this.config.maxToolCalls;
+    }
 
+    this.trace(`Planned ${tasks.length} tasks`);
     return { tasks, needsClarification: false };
   }
 
-  /**
-   * Execute a planned action. Validates constraints before execution.
-   */
   async executeAction(
     action: SupervisorAction,
     confirmWrite: (action: SupervisorAction) => Promise<boolean>,
   ): Promise<string> {
-    // Check tool call cap
     if (this.toolCallCount >= this.config.maxToolCalls) {
       throw new SupervisorError(
-        `Tool call cap reached (${this.config.maxToolCalls}). Cannot execute more actions.`,
+        `Tool call cap reached (${this.config.maxToolCalls}).`,
       );
     }
 
-    // Check if write action needs confirmation
     if (this.isWriteAction(action.tool)) {
-      this.trace(`Write action detected: ${action.tool}. Requesting confirmation...`);
+      this.trace(`Write action: ${action.tool}. Requesting confirmation...`);
       const confirmed = await confirmWrite(action);
       if (!confirmed) {
-        this.trace(`User declined write action: ${action.tool}`);
+        this.trace(`User declined: ${action.tool}`);
         return "Action declined by user.";
       }
     }
 
     this.toolCallCount++;
     this.actions.push(action);
-    this.trace(`Executing: ${action.tool} (${this.toolCallCount}/${this.config.maxToolCalls})`);
+    this.trace(
+      `Executing: ${action.tool} (${this.toolCallCount}/${this.config.maxToolCalls})`,
+    );
 
-    // In real implementation, this calls the actual tool via MCP
     return `[Result of ${action.tool}]`;
   }
 
   /**
-   * Get the complete trace log for debugging.
+   * Write the decision trace to .prdcli/runs/<timestamp>_agent-trace.md
    */
+  saveTraceLog(cwd: string = process.cwd()): string {
+    const runsDir = path.join(cwd, RUNS_DIR);
+    if (!fs.existsSync(runsDir)) {
+      fs.mkdirSync(runsDir, { recursive: true });
+    }
+
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/[:.]/g, "-")
+      .slice(0, 19);
+    const filename = `${timestamp}_agent-trace.md`;
+    const filepath = path.join(runsDir, filename);
+
+    const content = [
+      `# Supervisor Decision Trace`,
+      `- Project: ${this.project ?? "unknown"}`,
+      `- Time: ${new Date().toISOString()}`,
+      `- Tool calls: ${this.toolCallCount}/${this.config.maxToolCalls}`,
+      ``,
+      `## Actions`,
+      ...this.actions.map(
+        (a, i) => `${i + 1}. \`${a.tool}\` — ${a.reason}`,
+      ),
+      ``,
+      `## Trace Log`,
+      ...this.traceLog.map((t) => `- ${t}`),
+      ``,
+      `## Summary`,
+      this.getSummary(),
+    ].join("\n");
+
+    fs.writeFileSync(filepath, content);
+    return filepath;
+  }
+
   getTraceLog(): string {
     return this.traceLog.join("\n");
   }
 
-  /**
-   * Get summary of actions taken.
-   */
   getSummary(): string {
     return `Supervisor executed ${this.actions.length} actions:\n${this.actions.map((a) => `- ${a.tool}: ${a.reason}`).join("\n")}`;
   }
@@ -191,7 +245,10 @@ export class Supervisor {
       needsProject: true,
       needsSync: /sync|update|refresh/i.test(lower),
       reviewDoc: this.extractDoc(lower, /review\s+(\w+)/i),
-      askDoc: this.extractDoc(lower, /(?:ask|question)\w*\s+(?:about\s+)?(\w+)/i),
+      askDoc: this.extractDoc(
+        lower,
+        /(?:ask|question)\w*\s+(?:about\s+)?(\w+)/i,
+      ),
       draftTopic: this.extractTopic(lower),
       readMemory: /memory|decisions|history/i.test(lower),
       readSummaries: /summary|summaries|overview/i.test(lower),

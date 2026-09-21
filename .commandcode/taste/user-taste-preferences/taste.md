@@ -8,3 +8,7 @@
 - Comfortable with TypeScript, ESM modules, npm workspaces monorepo — did not object to these choices when the assistant selected them. Confidence: 0.7
 - Comfortable with the agent making architecture and tooling decisions autonomously (e.g. commander, @modelcontextprotocol/sdk, zod). Confidence: 0.75
 - Uses Windows platform (PowerShell for shell commands). Confidence: 0.9
+- Prefers SSH over HTTPS for GitHub git remotes (provided `git@github.com:` URL). Confidence: 0.85
+- Expects the agent to handle the full deployment pipeline autonomously (git init, commit, remote setup, push) without step-by-step confirmation. Confidence: 0.85
+- Expects the agent to independently test/verify API integrations and report back what setup is needed (e.g., missing permissions, required credentials). Confidence: 0.8
+- Provides sensitive credentials (API keys, app secrets) directly in chat for the agent to configure. Confidence: 0.8

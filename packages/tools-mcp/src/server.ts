@@ -2,6 +2,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { ScopeGuard, ScopeGuardError, ROOT_FOLDER_TOKEN } from "./scope-guard.js";
+import {
+  queryMessages,
+  listProjectMessages,
+} from "./message-pool/index.js";
 
 const scopeGuard = new ScopeGuard();
 
@@ -333,6 +337,64 @@ server.tool(
         },
       ],
     };
+  },
+);
+
+// ── query_message_pool ────────────────────────────────────────────────────
+server.tool(
+  "query_message_pool",
+  "Query the message pool for agent outputs. Returns structured messages matching the query.",
+  {
+    project: z.string().describe("Project name"),
+    type: z
+      .enum([
+        "doc_summary",
+        "review_result",
+        "question_list",
+        "draft_prd",
+        "critic_feedback",
+      ])
+      .optional()
+      .describe("Filter by message type"),
+    target_doc_node_id: z
+      .string()
+      .optional()
+      .describe("Filter by target document node ID"),
+    fresh_only: z
+      .boolean()
+      .optional()
+      .describe("Only return messages where all based_on hashes match current"),
+  },
+  async ({ project, type, target_doc_node_id, fresh_only }) => {
+    try {
+      const messages = queryMessages({
+        project,
+        type,
+        target_doc_node_id,
+        freshOnly: fresh_only,
+      });
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({ count: messages.length, messages }),
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({
+              error: "QUERY_FAILED",
+              message: err instanceof Error ? err.message : String(err),
+            }),
+          },
+        ],
+        isError: true,
+      };
+    }
   },
 );
 

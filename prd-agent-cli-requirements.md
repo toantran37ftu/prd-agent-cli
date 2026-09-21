@@ -136,6 +136,52 @@ Supervisor agent
 
 ---
 
+## 3.5 Structured Message Pool — lấy cảm hứng từ MetaGPT (SOP + publish/subscribe)
+
+**Vấn đề của thiết kế trước**: Orchestrator gọi sub-agent qua tool call ad-hoc, tự nhớ trạng thái bằng cách đọc file `.prdcli/runs/` — không có format thống nhất, khó biết "đã có review cho doc này chưa, còn mới không" một cách chắc chắn, và mỗi Orchestrator tự implement lại kiểu check này.
+
+**Cải tiến (theo MetaGPT)**: MetaGPT không để agent giao tiếp qua hội thoại tự do — mọi output đều là 1 "document" chuẩn hoá (PRD, design doc, task list...), và agent khác chỉ đọc đúng loại document mình cần (publish/subscribe), không đọc lại toàn bộ lịch sử. Áp dụng nguyên lý này vào hệ thống:
+
+### 3.5.1 Message Pool
+Mọi output của agent (không chỉ Writer) đều là 1 **message có type cố định**, lưu tại `.prdcli/messages/<project>/<type>__<target_doc_or_topic>.json`:
+```json
+{
+  "id": "msg_xxx",
+  "type": "review_result | question_list | draft_prd | critic_feedback | doc_summary",
+  "project": "project-A",
+  "target_doc_node_id": "...",          // null nếu type=draft_prd (chưa có doc thật)
+  "produced_by": "reviewer|verifier|question-gen|writer|critic|summarizer",
+  "based_on_hash": "sha256 của target_doc lúc tạo message này",  // để biết message có "stale" chưa
+  "created_at": "...",
+  "content": { ... },                    // đúng schema output của agent tương ứng (mục 2, 7-9)
+  "supersedes": "msg_id cũ nếu đây là bản revise (VD: draft_prd sau khi Writer revise theo Critic)"
+}
+```
+
+### 3.5.2 Publish / Subscribe thay cho "gọi thẳng tool"
+Mỗi Role Card (mục agent-prompts, xem file companion) khai báo rõ:
+- **Watch**: loại message role này cần đọc trước khi chạy (VD: Question Generator watch `review_result`).
+- **Publish**: loại message role này tạo ra sau khi chạy.
+
+Orchestrator, trước khi gọi 1 role, luôn check Message Pool: nếu đã có message đúng type, đúng `target_doc_node_id`, và `based_on_hash` khớp hash hiện tại của doc (tức doc chưa đổi từ lúc có message đó) → **dùng lại, không chạy lại role**. Đây là cơ chế chống lặp/tốn token chắc chắn hơn cách cũ (đọc `runs/` bằng heuristic).
+
+### 3.5.3 Lợi ích cụ thể cho hệ thống này
+- `AskOrchestrator` không cần tự đoán "có review gần đây không" nữa — chỉ query message pool theo `type=review_result, target_doc_node_id=X, based_on_hash=<hash hiện tại>`.
+- `Supervisor` (mục 3) có thể tự kiểm tra trạng thái project (đã review gì, đã hỏi gì, đã có draft nào) bằng cách list message pool, thay vì phải tự suy luận qua hội thoại.
+- Message pool tự nhiên là **audit trail đầy đủ theo doc/theo loại việc**, tách biệt khỏi `.prdcli/runs/` (vốn là log theo lần chạy command, không phải theo trạng thái nghiệp vụ).
+
+### 3.5.4 Role Card format (áp dụng cho mọi agent trong file `agent-prompts-and-workflows.md`)
+Mỗi prompt agent giờ khai báo thêm 4 trường chuẩn ở đầu (giống cách MetaGPT định nghĩa role qua Profile/Goal/Constraints/Actions):
+```
+- Profile: <tên vai trò, mô tả 1 câu>
+- Goal: <mục tiêu duy nhất của role này>
+- Constraints: <giới hạn bắt buộc — không bịa, luôn gắn nguồn, không tự ý ghi ngoài phạm vi...>
+- Watch: <message type(s) cần đọc trước khi chạy>
+- Publish: <message type tạo ra sau khi chạy>
+```
+
+---
+
 ## 4. Multi-channel / Runtime-agnostic
 
 Vấn đề: không khoá cứng vào 1 SDK/model. Giải pháp: tách "khả năng" (tools) khỏi "runtime chạy model", expose qua MCP chuẩn.
@@ -227,7 +273,10 @@ prd-agent-cli/
         agents/
           prompts/
             summarizer.md / reviewer.md / verifier.md / question-gen.md
-            writer.md / critic.md / prd-template.md / supervisor.md
+            writer.md / critic.md / supervisor.md
+            prd-templates/
+              lean.md / comprehensive.md / pr-faq.md / google-style.md
+              review-checklist.md
         commands/
           login.ts / project.ts / sync.ts / review.ts / ask.ts / draft.ts
           agent.ts                # NEW — path Supervisor, mục 3
@@ -385,8 +434,8 @@ prdcli status                   # user, project, channel, lastSyncAt, số cache
 ## 16. Cần bổ sung trước khi code (input còn thiếu)
 
 - [ ] App ID / App Secret thật.
-- [ ] Checklist review PRD cụ thể của team (`reviewer.md`, `critic.md`).
-- [ ] Template PRD chuẩn của team (`writer.md`, `prd-template.md`).
+- [ ] Checklist review PRD — đã có bản base (adapt từ 1 skill PM tham khảo, xem `agent-prompts-and-workflows.md` mục 2), team review lại xem có tiêu chí đặc thù nào cần thêm không.
+- [ ] 4 template PRD (Lean/Comprehensive/PR-FAQ/Google-style) — đã có bản base, team xác nhận có dùng đúng 4 loại này không hay cần gộp/bớt.
 - [ ] Format MCP config hiện hành của Codex CLI (ảnh hưởng `export-codex.ts`).
 - [ ] Model cho từng agent — có tách rẻ/nhanh (Summarizer, Verifier) vs mạnh hơn (Reviewer, Writer, Critic, Supervisor) hay dùng chung 1 model.
 

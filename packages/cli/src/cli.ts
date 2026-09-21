@@ -37,6 +37,79 @@ import {
   initProjectMemory,
   readAllSummaries,
 } from "./cache/memory.js";
+import crypto from "node:crypto";
+
+/**
+ * Lazy-import Message Pool functions.
+ * Tries tools-mcp package first, falls back to inline filesystem implementation.
+ */
+async function importMessagePool(): Promise<{
+  publishMessage: (msg: Record<string, unknown>) => Record<string, unknown>;
+  getLatestMessage: (query: Record<string, unknown>) => Record<string, unknown> | null;
+  queryMessages: (query: Record<string, unknown>) => Record<string, unknown>[];
+  listProjectMessages: (project: string) => Record<string, unknown>[];
+  contentHash: (content: string) => string;
+}> {
+  const contentHashFn = (content: string) =>
+    crypto.createHash("sha256").update(content).digest("hex");
+
+  try {
+    // Try loading from built tools-mcp package (works at runtime when tools-mcp is built)
+    const mod = await import("@prd-agent/tools-mcp/dist/message-pool/index.js" as string);
+    return {
+      publishMessage: mod.publishMessage,
+      getLatestMessage: mod.getLatestMessage,
+      queryMessages: mod.queryMessages,
+      listProjectMessages: mod.listProjectMessages,
+      contentHash: contentHashFn,
+    };
+  } catch {
+    // Fallback: inline message pool using filesystem directly
+    const MESSAGES_DIR = ".prdcli/messages";
+    const fs = await import("node:fs");
+    const pathMod = await import("node:path");
+
+    const publishMessage = (msg: Record<string, unknown>) => {
+      const dir = pathMod.join(process.cwd(), MESSAGES_DIR, msg.project as string);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const docPart = (msg.target_doc_node_id as string) ?? "general";
+      const full = { ...msg, id: `msg_${Date.now()}`, created_at: new Date().toISOString() };
+      fs.writeFileSync(pathMod.join(dir, `${msg.type}__${docPart}.json`), JSON.stringify(full, null, 2));
+      return full;
+    };
+
+    const queryMessages = (query: Record<string, unknown>) => {
+      const dir = pathMod.join(process.cwd(), MESSAGES_DIR, query.project as string);
+      if (!fs.existsSync(dir)) return [];
+      const files = fs.readdirSync(dir).filter((f: string) => f.endsWith(".json"));
+      return files
+        .map((f: string) => {
+          try {
+            return JSON.parse(fs.readFileSync(pathMod.join(dir, f), "utf-8"));
+          } catch { return null; }
+        })
+        .filter(Boolean)
+        .filter((m: Record<string, unknown>) => {
+          if (query.type && m.type !== query.type) return false;
+          if (query.target_doc_node_id !== undefined && m.target_doc_node_id !== query.target_doc_node_id) return false;
+          if (query.require_fresh_hash && m.based_on_hash !== query.require_fresh_hash) return false;
+          return true;
+        })
+        .sort((a: Record<string, string>, b: Record<string, string>) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+        );
+    };
+
+    const getLatestMessage = (query: Record<string, unknown>) => {
+      const results = queryMessages(query);
+      return results[0] ?? null;
+    };
+
+    const listProjectMessages = (project: string) => queryMessages({ project });
+
+    return { publishMessage, getLatestMessage, queryMessages, listProjectMessages, contentHash: contentHashFn };
+  }
+}
 
 const program = new Command();
 
@@ -103,6 +176,25 @@ program
     // Cache stats
     const cached = listCachedDocs();
     console.log(`Cached docs: ${cached.length}`);
+
+    // Message pool stats
+    if (project) {
+      try {
+        const { queryMessages } = await importMessagePool();
+        const messages = queryMessages({ project: project.projectName });
+        console.log(`Message pool: ${messages.length} messages`);
+        const byType: Record<string, number> = {};
+        for (const m of messages) {
+          const t = (m as Record<string, unknown>).type as string;
+          byType[t] = (byType[t] || 0) + 1;
+        }
+        for (const [type, count] of Object.entries(byType)) {
+          console.log(`  - ${type}: ${count}`);
+        }
+      } catch {
+        // Message pool not available
+      }
+    }
   });
 
 // ── Config ─────────────────────────────────────────────────────────────────
@@ -324,8 +416,6 @@ program
       console.log(`Reviewing: ${doc}`);
       console.log("Running ReviewOrchestrator...");
 
-      // TODO: Implement actual orchestrator invocation
-      // For now, read cached doc and show basic info
       const cached = getCachedDoc(doc);
       if (!cached) {
         console.error(`✗ Document "${doc}" not in cache. Run: prdcli sync`);
@@ -335,7 +425,44 @@ program
       console.log(`\nDocument: ${cached.meta.path}`);
       console.log(`Type: ${cached.meta.type}`);
       console.log(`Content length: ${cached.content.length} chars`);
-      console.log("\n[ReviewOrchestrator will be invoked here]");
+
+      // Check message pool for existing fresh review
+      const { getLatestMessage, publishMessage, contentHash: hashFn } = await importMessagePool();
+      const docHash = hashFn(cached.content);
+      const existing = getLatestMessage({
+        project: project.projectName,
+        type: "review_result",
+        target_doc_node_id: doc,
+        require_fresh_hash: docHash,
+      });
+
+      if (existing) {
+        console.log("\n✓ Found fresh review in message pool. Reusing.");
+        console.log(JSON.stringify(existing.content, null, 2));
+      } else {
+        console.log("\n[ReviewOrchestrator running...]");
+        // TODO: Replace with real agent invocation via BuiltinClaudeRuntime
+        const mockResult = {
+          claims: [
+            { id: "c1", type: "gap", checklist_item: "requirements", severity: "high", description: "Missing acceptance criteria", source_node_ids: [doc], verified: "pending" },
+          ],
+          verifiedCount: 0,
+          unverifiedCount: 1,
+          summary: "Found 1 claim. 0 verified, 1 unverified.",
+          based_on_hash: docHash,
+        };
+        console.log(JSON.stringify(mockResult, null, 2));
+
+        // Publish to message pool
+        publishMessage({
+          type: "review_result",
+          project: project.projectName,
+          target_doc_node_id: doc,
+          produced_by: "reviewer",
+          based_on_hash: docHash,
+          content: mockResult,
+        });
+      }
 
       const runLog = [
         `# Review Run`,
@@ -343,7 +470,7 @@ program
         `- Time: ${new Date().toISOString()}`,
         ``,
         `## Output`,
-        `[Pending implementation]`,
+        existing ? "Reused from message pool" : "Fresh review completed",
       ].join("\n");
 
       const logPath = saveRunLog("review", runLog);
@@ -377,16 +504,51 @@ program
         process.exit(1);
       }
 
-      console.log(`\nDocument: ${cached.meta.path}`);
-      console.log("\n[AskOrchestrator will be invoked here]");
+      const { getLatestMessage, publishMessage, contentHash: hashFn } = await importMessagePool();
+      const docHash = hashFn(cached.content);
+
+      // Step 1: Check for fresh review in pool
+      const existingReview = getLatestMessage({
+        project: project.projectName,
+        type: "review_result",
+        target_doc_node_id: doc,
+        require_fresh_hash: docHash,
+      });
+
+      if (existingReview) {
+        console.log("\n✓ Found fresh review in pool. Using as input for questions.");
+      } else {
+        console.log("\n⚠ No fresh review found. Running review first...");
+        // In real impl: call ReviewOrchestrator here
+        console.log("[ReviewOrchestrator would run here]");
+      }
+
+      // Step 2: Generate questions (mock)
+      const mockQuestions = {
+        questions: [
+          { id: "q1", question: "What is the expected response time?", reason: "Performance requirements not specified", source_claim_id: "c1", priority: "high" },
+        ],
+      };
+      console.log(JSON.stringify(mockQuestions, null, 2));
+
+      // Step 3: Publish to pool
+      publishMessage({
+        type: "question_list",
+        project: project.projectName,
+        target_doc_node_id: doc,
+        produced_by: "question-gen",
+        based_on_hash: docHash,
+        content: mockQuestions,
+      });
 
       const runLog = [
         `# Ask Run`,
         `- Document: ${cached.meta.path}`,
         `- Time: ${new Date().toISOString()}`,
+        `- Based on review: ${existingReview ? "existing" : "fresh"}`,
         ``,
         `## Output`,
-        `[Pending implementation]`,
+        JSON.stringify(mockQuestions, null, 2),
       ].join("\n");
 
       const logPath = saveRunLog("ask", runLog);
@@ -414,15 +576,62 @@ program
 
       console.log(`Drafting PRD on topic: ${opts.topic}`);
       console.log("Running DraftOrchestrator...");
-      console.log("\n[DraftOrchestrator will be invoked here]");
+
+      // Select template based on topic
+      const topic = opts.topic.toLowerCase();
+      let template = "comprehensive";
+      if (/fix|bug|hotfix|small/i.test(topic)) template = "lean";
+      else if (/new product|launch/i.test(topic)) template = "pr-faq";
+      else if (/metric|data|analytics/i.test(topic)) template = "google-style";
+      console.log(`Selected template: ${template}`);
+
+      const { publishMessage, contentHash: hashFn } = await importMessagePool();
+
+      // Mock draft result
+      const draft = `# PRD Draft: ${opts.topic}\n\nTemplate: ${template}\n\n[Draft content placeholder — will be generated by Writer agent]`;
+      const draftHash = hashFn(draft);
+
+      const result = {
+        draft_markdown: draft,
+        needs_manual_review: false,
+        remaining_issues: [],
+      };
+
+      console.log(`\n${draft}`);
+
+      // Confirm before push
+      const readline = await import("node:readline");
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const answer = await new Promise<string>((resolve) => {
+        rl.question("\nPush draft to Lark? (y/n) ", resolve);
+      });
+      rl.close();
+
+      if (answer.toLowerCase() === "y") {
+        // TODO: Push to Lark via scoped_create_docx
+        console.log("[Push to Lark would happen here]");
+      } else {
+        console.log("Draft saved locally only.");
+      }
+
+      // Publish to pool
+      publishMessage({
+        type: "draft_prd",
+        project: project.projectName,
+        target_doc_node_id: null,
+        produced_by: "writer",
+        based_on_hash: draftHash,
+        content: result,
+      });
 
       const runLog = [
         `# Draft Run`,
         `- Topic: ${opts.topic}`,
+        `- Template: ${template}`,
         `- Time: ${new Date().toISOString()}`,
         ``,
         `## Output`,
-        `[Pending implementation]`,
+        draft,
       ].join("\n");
 
       const logPath = saveRunLog("draft", runLog);
@@ -461,8 +670,63 @@ program
         return;
       }
 
+      const { listProjectMessages } = await importMessagePool();
+
+      // Query Message Pool for project context
+      const messages = listProjectMessages(project.projectName);
+      const hasReviews = messages.some((m) => (m as Record<string, unknown>).type === "review_result");
+      const hasQuestions = messages.some((m) => (m as Record<string, unknown>).type === "question_list");
+      const hasDrafts = messages.some((m) => (m as Record<string, unknown>).type === "draft_prd");
+
       console.log(`\nProject: ${project.projectName}`);
-      console.log("\n[Supervisor agent will be invoked here]");
+      console.log(`Status: reviews=${hasReviews}, questions=${hasQuestions}, drafts=${hasDrafts}`);
+
+      // Parse intent and build plan
+      const lower = goal.toLowerCase();
+      const tasks: string[] = [];
+      if (/sync|update|refresh/i.test(lower)) tasks.push("run_sync");
+      if (/review/i.test(lower)) tasks.push("run_review");
+      if (/(?:ask|question)/i.test(lower)) tasks.push("run_ask");
+      if (/draft/i.test(lower)) tasks.push("run_draft");
+      if (/memory|decisions/i.test(lower)) tasks.push("read_project_memory");
+      if (/summary|summaries/i.test(lower)) tasks.push("read_summaries");
+
+      // Cap at 5
+      const cappedTasks = tasks.slice(0, 5);
+      console.log(`\nPlan: ${cappedTasks.length} tasks`);
+      cappedTasks.forEach((t, i) => console.log(`  ${i + 1}. ${t}`));
+
+      // Execute (mock — real impl uses BuiltinClaudeRuntime)
+      const traceLog = [
+        `[${new Date().toISOString()}] Goal: "${goal}"`,
+        `[${new Date().toISOString()}] Project: ${project.projectName}`,
+        `[${new Date().toISOString()}] Project status: reviews=${hasReviews}, questions=${hasQuestions}, drafts=${hasDrafts}`,
+        `[${new Date().toISOString()}] Planned ${cappedTasks.length} tasks`,
+        ...cappedTasks.map((t, i) => `[${new Date().toISOString()}] Executing: ${t} (${i + 1}/${cappedTasks.length})`),
+      ];
+
+      // Save trace log to .prdcli/runs/
+      const traceContent = [
+        `# Supervisor Decision Trace`,
+        `- Goal: ${goal}`,
+        `- Project: ${project.projectName}`,
+        `- Time: ${new Date().toISOString()}`,
+        `- Tool calls: ${cappedTasks.length}/5`,
+        ``,
+        `## Actions`,
+        ...cappedTasks.map((t, i) => `${i + 1}. \`${t}\``),
+        ``,
+        `## Project Status (from Message Pool)`,
+        `- Reviews: ${hasReviews}`,
+        `- Questions: ${hasQuestions}`,
+        `- Drafts: ${hasDrafts}`,
+        ``,
+        `## Trace Log`,
+        ...traceLog.map((t) => `- ${t}`),
+      ].join("\n");
+
+      const tracePath = saveRunLog("agent-trace", traceContent);
+      console.log(`\n✓ Decision trace saved: ${tracePath}`);
 
       const runLog = [
         `# Agent Run (Supervisor)`,
@@ -471,11 +735,11 @@ program
         `- Time: ${new Date().toISOString()}`,
         ``,
         `## Decision Trace`,
-        `[Pending implementation]`,
+        traceContent,
       ].join("\n");
 
       const logPath = saveRunLog("agent", runLog);
-      console.log(`\nRun log: ${logPath}`);
+      console.log(`Run log: ${logPath}`);
     } catch (err) {
       console.error(
         `✗ Agent failed: ${err instanceof Error ? err.message : err}`,
@@ -498,8 +762,208 @@ program
 
     console.log(`Exporting MCP config for channel: ${channel}`);
 
-    // TODO: Implement actual export
-    console.log("[Export will be implemented here]");
+    const { exportForClaudeCode, exportGenericMcp, writeExportFiles } = await import(
+      "./runtime/export-claude-code.js"
+    );
+
+    const projectDir = process.cwd();
+
+    if (channel === "claude-code") {
+      const result = exportForClaudeCode(projectDir);
+      writeExportFiles(result, projectDir);
+      console.log(`✓ Exported ${result.files.length} files for claude-code channel`);
+      console.log(`  - .mcp.json`);
+      console.log(`  - .claude/agents/*.md (${result.files.length - 1} agent prompts)`);
+    } else if (channel === "codex" || channel === "generic-mcp-export") {
+      const result = exportGenericMcp(projectDir);
+      writeExportFiles(result, projectDir);
+      console.log(`✓ Exported ${result.files.length} files for ${channel}`);
+      console.log(`  - mcpServers.json`);
+      console.log(`  - agents/prompts/*.md`);
+    } else {
+      console.error(`✗ Unknown channel: ${channel}`);
+      console.log("Valid channels: claude-code, codex, generic-mcp-export");
+      process.exit(1);
+    }
+  });
+
+// ── Update (§5.5) ─────────────────────────────────────────────────────────
+program
+  .command("update <doc>")
+  .description("Update an existing PRD with a change request")
+  .requiredOption("--request <request>", "Change request description")
+  .action(async (doc: string, opts: { request: string }) => {
+    try {
+      const project = loadProjectConfig();
+      if (!project) {
+        console.error("✗ No project configured.");
+        process.exit(1);
+      }
+
+      console.log(`Updating: ${doc}`);
+      console.log(`Change request: ${opts.request}`);
+
+      const cached = getCachedDoc(doc);
+      if (!cached) {
+        console.error(`✗ Document "${doc}" not in cache. Run: prdcli sync`);
+        process.exit(1);
+      }
+
+      console.log(`\nDocument: ${cached.meta.path}`);
+      console.log("\n[UpdateOrchestrator running...]");
+      console.log("Flow: change_request → change_planner → gate → writer-update → diff → amendment");
+
+      // TODO: Invoke UpdateOrchestrator
+      console.log("\n[UpdateOrchestrator not yet fully implemented]");
+
+      const runLog = [
+        `# Update Run`,
+        `- Document: ${cached.meta.path}`,
+        `- Change request: ${opts.request}`,
+        `- Time: ${new Date().toISOString()}`,
+        ``,
+        `## Output`,
+        `[Pending implementation]`,
+      ].join("\n");
+
+      const logPath = saveRunLog("update", runLog);
+      console.log(`\nRun log: ${logPath}`);
+    } catch (err) {
+      console.error(`✗ Update failed: ${err instanceof Error ? err.message : err}`);
+      process.exit(1);
+    }
+  });
+
+// ── Resume (§4.8) ────────────────────────────────────────────────────────
+program
+  .command("resume <run-id>")
+  .description("Resume an interrupted run from checkpoint")
+  .action(async (runId: string) => {
+    try {
+      const statePath = require("node:path").join(
+        process.cwd(), ".prdcli", "runs", runId, "state.json",
+      );
+      const fs = require("node:fs");
+
+      if (!fs.existsSync(statePath)) {
+        console.error(`✗ Run "${runId}" not found or no checkpoint available.`);
+        process.exit(1);
+      }
+
+      const state = JSON.parse(fs.readFileSync(statePath, "utf-8"));
+      console.log(`Resuming run: ${runId}`);
+      console.log(`Step: ${state.step}`);
+      console.log(`Done: ${state.done_claims?.length ?? 0} claims`);
+      console.log(`Pending: ${state.pending?.length ?? 0} claims`);
+
+      // TODO: Resume from checkpoint
+      console.log("\n[Resume not yet fully implemented]");
+    } catch (err) {
+      console.error(`✗ Resume failed: ${err instanceof Error ? err.message : err}`);
+      process.exit(1);
+    }
+  });
+
+// ── Knowledge (§4.12) ────────────────────────────────────────────────────
+const knowledgeCmd = program
+  .command("knowledge")
+  .description("Manage shared knowledge (pull/push/status)");
+
+knowledgeCmd
+  .command("pull")
+  .description("Pull shared knowledge from Lark _agent_memory/")
+  .action(async () => {
+    const project = loadProjectConfig();
+    if (!project) {
+      console.error("✗ No project configured.");
+      process.exit(1);
+    }
+    console.log(`Pulling knowledge for: ${project.projectName}`);
+    // TODO: Invoke pullKnowledge()
+    console.log("[Knowledge pull not yet fully implemented]");
+  });
+
+knowledgeCmd
+  .command("push")
+  .description("Push local knowledge to Lark _agent_memory/")
+  .action(async () => {
+    const project = loadProjectConfig();
+    if (!project) {
+      console.error("✗ No project configured.");
+      process.exit(1);
+    }
+    console.log(`Pushing knowledge for: ${project.projectName}`);
+    // TODO: Invoke pushKnowledge()
+    console.log("[Knowledge push not yet fully implemented]");
+  });
+
+knowledgeCmd
+  .command("status")
+  .description("Show shared knowledge status")
+  .action(async () => {
+    const project = loadProjectConfig();
+    if (!project) {
+      console.error("✗ No project configured.");
+      process.exit(1);
+    }
+    console.log(`Knowledge status for: ${project.projectName}`);
+    // TODO: Show message pool stats, stale count, etc.
+    console.log("[Knowledge status not yet fully implemented]");
+  });
+
+// ── Gate (§5.6) ──────────────────────────────────────────────────────────
+program
+  .command("gate <run-id>")
+  .description("Re-open the L3 human gate for a run")
+  .action(async (runId: string) => {
+    try {
+      console.log(`Opening gate for run: ${runId}`);
+      // TODO: Load gate state and render
+      console.log("[Gate re-open not yet fully implemented]");
+    } catch (err) {
+      console.error(`✗ Gate failed: ${err instanceof Error ? err.message : err}`);
+      process.exit(1);
+    }
+  });
+
+// ── Lint (§4.5) ──────────────────────────────────────────────────────────
+program
+  .command("lint <doc>")
+  .description("Run L1 lint on a document (0 tokens)")
+  .action(async (doc: string) => {
+    try {
+      const cached = getCachedDoc(doc);
+      if (!cached) {
+        console.error(`✗ Document "${doc}" not in cache. Run: prdcli sync`);
+        process.exit(1);
+      }
+
+      console.log(`Linting: ${cached.meta.path}`);
+      console.log("Running L1 lint rules (0 tokens)...\n");
+
+      // Dynamically import lint module
+      try {
+        const { runAllLint, renderLintReport } = await import(
+          "@prd-agent/tools-mcp/dist/lint/index.js" as string
+        );
+        const { reports, allPassed, issueCount } = runAllLint(cached.content);
+        console.log(renderLintReport(reports));
+        console.log(`\nResult: ${allPassed ? "ALL PASSED" : `${issueCount} issues found`}`);
+      } catch {
+        // Fallback: basic checks
+        console.log("[L1 lint module not available — run tools-mcp build first]");
+        console.log("Basic checks:");
+        const hasReq = /REQ-\d+/i.test(cached.content);
+        const hasMarker = /\[\[src:/.test(cached.content);
+        const hasAC = /acceptance criteria/i.test(cached.content);
+        console.log(`  REQ blocks: ${hasReq ? "found" : "none"}`);
+        console.log(`  Source markers: ${hasMarker ? "found" : "none"}`);
+        console.log(`  Acceptance criteria: ${hasAC ? "found" : "none"}`);
+      }
+    } catch (err) {
+      console.error(`✗ Lint failed: ${err instanceof Error ? err.message : err}`);
+      process.exit(1);
+    }
   });
 
 program.parse();

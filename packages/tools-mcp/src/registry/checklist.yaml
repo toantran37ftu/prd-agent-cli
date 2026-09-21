@@ -1,0 +1,166 @@
+- id: PROB-EVIDENCE
+  text: Problem statement có bằng chứng (research/data/ticket), không chỉ là giả định
+  group: content_completeness
+  verifiability: cross_doc
+  detector: null
+  on_fail: [gap, cannot_determine]
+  severity_default: high
+  templates: [lean, standard, comprehensive, pr-faq, google]
+
+- id: PROB-WHO
+  text: Problem statement nêu rõ ai gặp vấn đề
+  group: content_completeness
+  verifiability: cross_doc
+  detector: null
+  on_fail: [gap]
+  severity_default: high
+  templates: [lean, standard, comprehensive, pr-faq, google]
+
+- id: GOALS-SMART
+  text: Mục tiêu đo lường được (SMART)
+  group: content_completeness
+  verifiability: lint
+  detector: "goal không chứa con số hoặc tiêu chí đo"
+  on_fail: [gap]
+  severity_default: medium
+  templates: [standard, comprehensive, google]
+
+- id: METRIC-BASELINE
+  text: Success metric có baseline, target và thời điểm đo
+  group: content_completeness
+  verifiability: lint
+  detector: "metric có tên nhưng thiếu >=1 trong {baseline, target, thời điểm}"
+  on_fail: [gap]
+  severity_default: medium
+  templates: [standard, comprehensive, google]
+
+- id: METRIC-LEAD-LAG
+  text: Có cả leading metric và lagging metric
+  group: content_completeness
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: low
+  templates: [comprehensive, google]
+
+- id: SCOPE-SEPARATED
+  text: Scope và Out of scope tách riêng
+  group: content_completeness
+  verifiability: lint
+  detector: "thiếu 1 trong 2 section"
+  on_fail: [gap]
+  severity_default: high
+  templates: [lean, standard, comprehensive, pr-faq, google]
+
+- id: REQ-AC
+  text: Mỗi requirement có acceptance criteria
+  group: content_completeness
+  verifiability: lint
+  detector: "REQ block không chứa mục Acceptance criteria và không có nhãn thoát hiểm"
+  on_fail: [gap]
+  severity_default: medium
+  templates: [lean, standard, comprehensive, google]
+
+- id: REQ-P0-RATIO
+  text: Không phải requirement nào cũng P0
+  group: content_completeness
+  verifiability: lint
+  detector: "count(P0)/count(REQ) > MAX_P0_RATIO"
+  on_fail: [gap]
+  severity_default: low
+  templates: [lean, standard, comprehensive, google]
+
+- id: DEPENDENCY-TECH
+  text: Phụ thuộc hệ thống/đối tác được nhắc tới
+  group: content_completeness
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: medium
+  templates: [standard, comprehensive, google]
+
+- id: TIMELINE-MATCH
+  text: Timeline khớp cam kết trong meeting note
+  group: content_completeness
+  verifiability: cross_doc
+  detector: null
+  on_fail: [gap, contradiction]
+  severity_default: medium
+  templates: [comprehensive, google]
+
+- id: NFR-PERF
+  text: Non-functional requirements (performance/security/scale/accessibility/reliability)
+  group: content_completeness
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: low
+  templates: [standard, comprehensive, google]
+
+- id: VAGUE-LANGUAGE
+  text: Ngôn ngữ mơ hồ trong REQ/metric
+  group: writing_quality
+  verifiability: lint
+  detector: "từ điển mơ hồ tiếng Việt xuất hiện trong REQ/metric không kèm số"
+  on_fail: [gap]
+  severity_default: medium
+  templates: [lean, standard, comprehensive, pr-faq, google]
+
+- id: CONTRADICTION-INTERNAL
+  text: Mâu thuẫn nội bộ giữa các section
+  group: writing_quality
+  verifiability: cross_doc
+  detector: null
+  on_fail: [contradiction]
+  severity_default: high
+  templates: [lean, standard, comprehensive, pr-faq, google]
+
+- id: PRIORITIZATION
+  text: Có phân P0/P1/P2 rõ ràng
+  group: writing_quality
+  verifiability: lint
+  detector: "thiếu priority hoặc toàn bộ cùng mức"
+  on_fail: [gap]
+  severity_default: low
+  templates: [lean, standard, comprehensive, google]
+
+- id: GO-NOGO
+  text: Có tiêu chí Go/No-Go cho launch
+  group: gtm_risk
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: low
+  templates: [comprehensive, google]
+
+- id: TEAM-ENG-REVIEW
+  text: Engineering đã review và xác nhận tính khả thi
+  group: team_alignment
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [standard, comprehensive, google]
+
+- id: TEAM-SUPPORT-PREP
+  text: Bộ phận support đã được chuẩn bị (docs, training, FAQ)
+  group: team_alignment
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [comprehensive, google]
+
+- id: APPROVAL-REQUIRED
+  text: Đã có đủ reviewer bắt buộc
+  group: approval
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [standard, comprehensive, pr-faq, google]
+
+- id: EXEC-SUMMARY-SUBSET
+  text: Executive summary chỉ chứa fact có trong body
+  group: template_specific
+  verifiability: lint
+  detector: "fact trong summary không xuất hiện trong body"
+  on_fail: [gap]
+  severity_default: high
+  templates: [comprehensive, google]
