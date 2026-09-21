@@ -1,0 +1,13 @@
+{
+  "name": "prd-agent-cli",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "dev:cli": "npm run dev -w packages/cli",
+    "dev:mcp": "npm run dev -w packages/tools-mcp"
+  }
+}

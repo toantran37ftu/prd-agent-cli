@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.prdcli/
+*.js
+*.d.ts
+*.map
+.env
+.env.local
