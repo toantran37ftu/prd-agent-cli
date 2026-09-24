@@ -12,3 +12,5 @@
 - Expects the agent to handle the full deployment pipeline autonomously (git init, commit, remote setup, push) without step-by-step confirmation. Confidence: 0.85
 - Expects the agent to independently test/verify API integrations and report back what setup is needed (e.g., missing permissions, required credentials). Confidence: 0.8
 - Provides sensitive credentials (API keys, app secrets) directly in chat for the agent to configure. Confidence: 0.8
+- Prefers comprehensive completeness/status audits when reviewing a repo — asks "đã đầy đủ chưa" (is it complete?) expecting the agent to check all components and report gaps. Confidence: 0.8
+- Prefers receiving full artifact content (e.g. all prompts, all configs) when reviewing a project, not just summaries or file listings. Confidence: 0.75

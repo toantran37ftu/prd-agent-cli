@@ -41,3 +41,15 @@ export function isTokenExpired(data: TokenData): boolean {
   // Returns true if token expires within 5 minutes
   return Date.now() > data.expiresAt - 5 * 60 * 1000;
 }
+
+/**
+ * Refresh the access token using the refresh token.
+ * Stub implementation — real Lark OAuth refresh logic to be added.
+ */
+export async function refreshAccessToken(data?: TokenData): Promise<TokenData | null> {
+  const token = data ?? loadToken();
+  if (!token) return null;
+  // TODO: Implement real Lark OAuth token refresh
+  // For now, return the existing token (will expire and require re-login)
+  return token;
+}

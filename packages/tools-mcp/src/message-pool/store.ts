@@ -15,6 +15,7 @@ import type {
   BasedOnEntry,
   ProducedBy,
 } from "./types.js";
+import { loadGraph, saveGraph, addDependency } from "../graph/index.js";
 
 const MESSAGES_DIR = ".prdcli/messages";
 
@@ -81,6 +82,19 @@ export function publishMessage(
 
   const filePath = messageFilePath(msg, cwd);
   fs.writeFileSync(filePath, JSON.stringify(msg, null, 2), "utf-8");
+
+  // Wire dependency graph (§4.7): record which nodes this message depends on
+  try {
+    const graph = loadGraph(cwd);
+    const depNodeIds = msg.based_on.map((b) => b.node_id);
+    if (depNodeIds.length > 0) {
+      addDependency(graph, msg.id, depNodeIds);
+      saveGraph(graph, cwd);
+    }
+  } catch {
+    // Graph wiring failure should not block message publishing
+  }
+
   return msg;
 }
 

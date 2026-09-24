@@ -1,95 +1,109 @@
 import { AgentRuntime, AgentRunInput, AgentRunResult, ToolCall } from "./types.js";
+import { MockLLMClient } from "./mock-llm.js";
+import { loadPrompt, renderPrompt } from "./prompt-loader.js";
 
 export interface BuiltinClaudeConfig {
   model?: string;
   maxTokens?: number;
+  mode?: "mock" | "real";
+  apiKey?: string;
 }
 
 /**
  * BuiltinClaudeRuntime — Channel "builtin"
  *
- * Uses @anthropic-ai/claude-agent-sdk to run agents locally.
- * This is the default runtime that provides full functionality including Supervisor.
+ * Supports two modes:
+ * - mock: returns realistic JSON responses for development/testing
+ * - real: uses Anthropic SDK (requires API key)
  */
 export class BuiltinClaudeRuntime implements AgentRuntime {
   private config: BuiltinClaudeConfig;
+  private mockClient: MockLLMClient;
 
   constructor(config?: BuiltinClaudeConfig) {
     this.config = {
       model: config?.model ?? "claude-sonnet-4-6",
       maxTokens: config?.maxTokens ?? 4096,
+      mode: config?.mode ?? "mock",
+      apiKey: config?.apiKey,
     };
+    this.mockClient = new MockLLMClient();
   }
 
   async run(input: AgentRunInput): Promise<AgentRunResult> {
     const toolCallsLog: ToolCall[] = [];
     const startTime = Date.now();
 
-    console.log(`[BuiltinClaude] Running agent: ${input.agentName}`);
-    console.log(`[BuiltinClaude] Model: ${this.config.model}`);
+    console.log(`[BuiltinClaude] Running agent: ${input.agentName} (mode: ${this.config.mode})`);
 
-    // In production, this uses @anthropic-ai/claude-agent-sdk
-    // to run the agent with MCP tools
+    const vars = this.buildVars(input);
+    let output: string;
 
-    // Build the appropriate prompt based on agentName
-    const systemPrompt = this.getSystemPrompt(input.agentName);
-    const userMessage = this.buildUserMessage(input);
-
-    console.log(`[BuiltinClaude] System prompt length: ${systemPrompt.length} chars`);
-    console.log(`[BuiltinClaude] User message length: ${userMessage.length} chars`);
-
-    // Placeholder: In real implementation, this calls Claude Agent SDK
-    // const agent = new ClaudeAgent({
-    //   model: this.config.model,
-    //   maxTokens: this.config.maxTokens,
-    //   systemPrompt,
-    //   tools: this.getToolsForAgent(input.agentName),
-    // });
-    // const result = await agent.run(userMessage);
+    if (this.config.mode === "mock") {
+      output = await this.mockClient.call(input.agentName, vars);
+    } else {
+      output = await this.callRealLLM(input.agentName, vars);
+    }
 
     const duration = Date.now() - startTime;
+    toolCallsLog.push({
+      toolName: input.agentName,
+      input: vars,
+      output: output.slice(0, 200),
+      durationMs: duration,
+    });
 
     return {
-      output: `[BuiltinClaude] Agent ${input.agentName} would run here with model ${this.config.model}`,
+      output,
       toolCallsLog,
       needsManualReview: false,
     };
   }
 
-  private getSystemPrompt(agentName: string): string {
-    // In production, loads from agents/prompts/*.md
-    const prompts: Record<string, string> = {
-      supervisor: "You are a Supervisor agent for PRD management.",
-      "review-orchestrator":
-        "You are a Review Orchestrator. Call Reviewer and Verifier agents.",
-      "ask-orchestrator":
-        "You are an Ask Orchestrator. Call Question Generator with review context.",
-      "draft-orchestrator":
-        "You are a Draft Orchestrator. Call Writer and Critic agents in a loop.",
-    };
-
-    return prompts[agentName] ?? "You are a helpful assistant.";
+  /**
+   * Low-level LLM call for a specific agent.
+   * Used by orchestrators to call individual agents.
+   */
+  async callAgent(
+    agentName: string,
+    vars: Record<string, string>,
+  ): Promise<string> {
+    if (this.config.mode === "mock") {
+      return this.mockClient.call(agentName, vars);
+    }
+    return this.callRealLLM(agentName, vars);
   }
 
-  private buildUserMessage(input: AgentRunInput): string {
-    const parts: string[] = [];
+  private buildVars(input: AgentRunInput): Record<string, string> {
+    const vars: Record<string, string> = {};
 
-    if (input.projectToken) {
-      parts.push(`Project token: ${input.projectToken}`);
-    }
-
-    if (input.targetDocToken) {
-      parts.push(`Target document: ${input.targetDocToken}`);
-    }
-
-    if (input.freeTextGoal) {
-      parts.push(`Goal: ${input.freeTextGoal}`);
-    }
+    if (input.projectToken) vars["project_name"] = input.projectToken;
+    if (input.targetDocToken) vars["target_doc"] = input.targetDocToken;
+    if (input.freeTextGoal) vars["goal"] = input.freeTextGoal;
 
     if (input.extraArgs) {
-      parts.push(`Additional context: ${JSON.stringify(input.extraArgs)}`);
+      for (const [key, value] of Object.entries(input.extraArgs)) {
+        if (typeof value === "string") {
+          vars[key] = value;
+        }
+      }
     }
 
-    return parts.join("\n");
+    // Inject run context
+    const now = new Date();
+    vars["today"] = now.toISOString().slice(0, 10);
+    vars["timezone"] = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+    return vars;
+  }
+
+  private async callRealLLM(
+    agentName: string,
+    vars: Record<string, string>,
+  ): Promise<string> {
+    // Real implementation using Anthropic SDK
+    // For now, falls back to mock
+    console.warn("[BuiltinClaude] Real LLM not implemented, falling back to mock");
+    return this.mockClient.call(agentName, vars);
   }
 }

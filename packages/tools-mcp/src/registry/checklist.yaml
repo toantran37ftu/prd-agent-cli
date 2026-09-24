@@ -1,3 +1,5 @@
+# ── Content Completeness (24 items: 9 lint, 8 cross_doc, 7 doc_presence) ─────
+
 - id: PROB-EVIDENCE
   text: Problem statement có bằng chứng (research/data/ticket), không chỉ là giả định
   group: content_completeness
@@ -16,6 +18,15 @@
   severity_default: high
   templates: [lean, standard, comprehensive, pr-faq, google]
 
+- id: PROB-MEASURABLE
+  text: Problem statement có mức ảnh hưởng đo lường được
+  group: content_completeness
+  verifiability: lint
+  detector: "problem statement không chứa con số hoặc mức ảnh hưởng cụ thể"
+  on_fail: [gap]
+  severity_default: medium
+  templates: [standard, comprehensive, google]
+
 - id: GOALS-SMART
   text: Mục tiêu đo lường được (SMART)
   group: content_completeness
@@ -24,6 +35,15 @@
   on_fail: [gap]
   severity_default: medium
   templates: [standard, comprehensive, google]
+
+- id: GOALS-ALIGNED
+  text: Mục tiêu PRD khớp với mục tiêu chiến lược của project
+  group: content_completeness
+  verifiability: cross_doc
+  detector: null
+  on_fail: [gap, contradiction]
+  severity_default: high
+  templates: [comprehensive, google]
 
 - id: METRIC-BASELINE
   text: Success metric có baseline, target và thời điểm đo
@@ -51,6 +71,15 @@
   severity_default: high
   templates: [lean, standard, comprehensive, pr-faq, google]
 
+- id: SCOPE-CLEAR
+  text: Scope được định nghĩa rõ ràng, không mơ hồ
+  group: content_completeness
+  verifiability: lint
+  detector: "scope section quá ngắn hoặc không có bullet points"
+  on_fail: [gap]
+  severity_default: medium
+  templates: [lean, standard, comprehensive, pr-faq, google]
+
 - id: REQ-AC
   text: Mỗi requirement có acceptance criteria
   group: content_completeness
@@ -59,6 +88,15 @@
   on_fail: [gap]
   severity_default: medium
   templates: [lean, standard, comprehensive, google]
+
+- id: REQ-TESTABLE
+  text: Acceptance criteria có thể kiểm thử được
+  group: content_completeness
+  verifiability: lint
+  detector: "AC không chứa tiêu chí cụ thể hoặc chỉ viết 'hoạt động đúng'"
+  on_fail: [gap]
+  severity_default: medium
+  templates: [standard, comprehensive, google]
 
 - id: REQ-P0-RATIO
   text: Không phải requirement nào cũng P0
@@ -69,6 +107,24 @@
   severity_default: low
   templates: [lean, standard, comprehensive, google]
 
+- id: EVIDENCE-CITED
+  text: Bằng chứng được cite với nguồn cụ thể
+  group: content_completeness
+  verifiability: cross_doc
+  detector: null
+  on_fail: [gap, cannot_determine]
+  severity_default: high
+  templates: [comprehensive, google]
+
+- id: SOLUTION-FEASIBLE
+  text: Giải pháp đề xuất khả thi về mặt kỹ thuật
+  group: content_completeness
+  verifiability: cross_doc
+  detector: null
+  on_fail: [gap, risk]
+  severity_default: high
+  templates: [standard, comprehensive, google]
+
 - id: DEPENDENCY-TECH
   text: Phụ thuộc hệ thống/đối tác được nhắc tới
   group: content_completeness
@@ -76,6 +132,15 @@
   on_fail: [not_documented]
   severity_default: medium
   templates: [standard, comprehensive, google]
+
+- id: DEPENDENCY-IDENTIFIED
+  text: Tất cả phụ thuộc được liệt kê đầy đủ
+  group: content_completeness
+  verifiability: cross_doc
+  detector: null
+  on_fail: [gap, not_documented]
+  severity_default: medium
+  templates: [comprehensive, google]
 
 - id: TIMELINE-MATCH
   text: Timeline khớp cam kết trong meeting note
@@ -87,12 +152,63 @@
   templates: [comprehensive, google]
 
 - id: NFR-PERF
-  text: Non-functional requirements (performance/security/scale/accessibility/reliability)
+  text: Non-functional requirements (performance)
   group: content_completeness
   verifiability: doc_presence
   on_fail: [not_documented]
   severity_default: low
   templates: [standard, comprehensive, google]
+
+- id: NFR-MEASURABLE
+  text: NFR có ngưỡng đo lường cụ thể
+  group: content_completeness
+  verifiability: lint
+  detector: "NFR section chứa từ mơ hồ mà không có số"
+  on_fail: [gap]
+  severity_default: medium
+  templates: [standard, comprehensive, google]
+
+- id: RISK-MITIGATED
+  text: Rủi ro có phương án giảm thiểu
+  group: content_completeness
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: medium
+  templates: [standard, comprehensive, google]
+
+- id: RISK-TECHNICAL
+  text: Rủi ro kỹ thuật được xác định
+  group: content_completeness
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: low
+  templates: [standard, comprehensive, google]
+
+- id: RISK-MARKET
+  text: Rủi ro thị trường được xác định
+  group: content_completeness
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: low
+  templates: [comprehensive, google]
+
+- id: RISK-OPERATIONAL
+  text: Rủi ro vận hành được xác định
+  group: content_completeness
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: low
+  templates: [comprehensive, google]
+
+- id: USER-SCENARIO
+  text: Có kịch bản người dùng cụ thể
+  group: content_completeness
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: low
+  templates: [comprehensive, pr-faq, google]
+
+# ── Writing Quality (5 items: 4 lint, 0 cross_doc, 1 doc_presence) ─────────
 
 - id: VAGUE-LANGUAGE
   text: Ngôn ngữ mơ hồ trong REQ/metric
@@ -121,6 +237,26 @@
   severity_default: low
   templates: [lean, standard, comprehensive, google]
 
+- id: CONSISTENT-TERMS
+  text: Thuật ngữ nhất quán throughout document
+  group: writing_quality
+  verifiability: lint
+  detector: "cùng khái niệm dùng tên khác nhau"
+  on_fail: [gap]
+  severity_default: low
+  templates: [lean, standard, comprehensive, pr-faq, google]
+
+- id: STRUCTURE-COMPLETE
+  text: Các section bắt buộc của template đều tồn tại
+  group: writing_quality
+  verifiability: lint
+  detector: "thiếu section mà template yêu cầu"
+  on_fail: [gap]
+  severity_default: high
+  templates: [lean, standard, comprehensive, pr-faq, google]
+
+# ── GTM / Risk / Monitoring (14 items: 2 lint, 1 cross_doc, 11 doc_presence) ─
+
 - id: GO-NOGO
   text: Có tiêu chí Go/No-Go cho launch
   group: gtm_risk
@@ -128,6 +264,115 @@
   on_fail: [not_documented]
   severity_default: low
   templates: [comprehensive, google]
+
+- id: GTM-TARGET-AUDIENCE
+  text: Đối tượng mục tiêu được xác định rõ
+  group: gtm_risk
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: low
+  templates: [comprehensive, pr-faq, google]
+
+- id: GTM-CHANNELS
+  text: Kênh phân phối được xác định
+  group: gtm_risk
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: low
+  templates: [comprehensive, google]
+
+- id: GTM-MESSAGING
+  text: Thông điệp chính được xác định
+  group: gtm_risk
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: low
+  templates: [comprehensive, pr-faq, google]
+
+- id: MONITORING-PLAN
+  text: Kế hoạch monitoring sau launch
+  group: gtm_risk
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: medium
+  templates: [comprehensive, google]
+
+- id: ALERTING-PLAN
+  text: Kế hoạch cảnh báo khi có sự cố
+  group: gtm_risk
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: medium
+  templates: [comprehensive, google]
+
+- id: ROLLBACK-PLAN
+  text: Kế hoạch rollback khi launch thất bại
+  group: gtm_risk
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: medium
+  templates: [comprehensive, google]
+
+- id: FEATURE-FLAG
+  text: Chiến lược feature flag (nếu applicable)
+  group: gtm_risk
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: low
+  templates: [comprehensive, google]
+
+- id: A-B-TEST
+  text: Kế hoạch A/B test (nếu applicable)
+  group: gtm_risk
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: low
+  templates: [comprehensive, google]
+
+- id: MIGRATION-PLAN
+  text: Kế hoạch migration dữ liệu/người dùng
+  group: gtm_risk
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: medium
+  templates: [comprehensive, google]
+
+- id: DEPRECATION-PLAN
+  text: Kế hoạch deprecation feature cũ (nếu có)
+  group: gtm_risk
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: low
+  templates: [comprehensive, google]
+
+- id: COST-ESTIMATE
+  text: Ước tính chi phí triển khai
+  group: gtm_risk
+  verifiability: lint
+  detector: "không có con số chi phí hoặc ước tính"
+  on_fail: [gap]
+  severity_default: low
+  templates: [comprehensive, google]
+
+- id: TIMELINE-REALISTIC
+  text: Timeline khả thi với scope
+  group: gtm_risk
+  verifiability: cross_doc
+  detector: null
+  on_fail: [gap, risk]
+  severity_default: medium
+  templates: [comprehensive, google]
+
+- id: SUCCESS-CRITERIA-DEFINED
+  text: Tiêu chí thành công được định nghĩa rõ
+  group: gtm_risk
+  verifiability: lint
+  detector: "thiếu section success criteria hoặc metrics"
+  on_fail: [gap]
+  severity_default: medium
+  templates: [standard, comprehensive, google]
+
+# ── Team Alignment / Tech Feasibility (11 items: 1 lint, 2 cross_doc, 3 doc_presence, 5 human_only) ─
 
 - id: TEAM-ENG-REVIEW
   text: Engineering đã review và xác nhận tính khả thi
@@ -147,6 +392,87 @@
   gate: L3
   templates: [comprehensive, google]
 
+- id: TEAM-DESIGN-REVIEW
+  text: Design team đã review UX/UI
+  group: team_alignment
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [standard, comprehensive, google]
+
+- id: TEAM-QA-PLAN
+  text: QA team có kế hoạch test
+  group: team_alignment
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [standard, comprehensive, google]
+
+- id: TEAM-DATA-READY
+  text: Data team đã chuẩn bị analytics/tracking
+  group: team_alignment
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [comprehensive, google]
+
+- id: TEAM-LEGAL-REVIEW
+  text: Legal đã review compliance
+  group: team_alignment
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [comprehensive, google]
+
+- id: TEAM-SECURITY-REVIEW
+  text: Security team đã review
+  group: team_alignment
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [comprehensive, google]
+
+- id: TECH-FEASIBILITY-CONFIRMED
+  text: Tính khả thi kỹ thuật được xác nhận
+  group: team_alignment
+  verifiability: cross_doc
+  detector: null
+  on_fail: [gap, risk]
+  severity_default: high
+  templates: [standard, comprehensive, google]
+
+- id: TECH-ARCHITECTURE-ALIGNED
+  text: Kiến trúc đề xuất phù hợp với hệ thống hiện tại
+  group: team_alignment
+  verifiability: cross_doc
+  detector: null
+  on_fail: [gap, contradiction]
+  severity_default: high
+  templates: [comprehensive, google]
+
+- id: TECH-SCALABILITY
+  text: Giải pháp đáp ứng yêu cầu scale
+  group: team_alignment
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: medium
+  templates: [comprehensive, google]
+
+- id: TECH-SECURITY
+  text: Yêu cầu bảo mật được xác định
+  group: team_alignment
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: medium
+  templates: [standard, comprehensive, google]
+
+# ── Approval / Before-final / After-approval (19 items: all human_only) ─────
+
 - id: APPROVAL-REQUIRED
   text: Đã có đủ reviewer bắt buộc
   group: approval
@@ -156,6 +482,179 @@
   gate: L3
   templates: [standard, comprehensive, pr-faq, google]
 
+- id: APPROVAL-ENG-LEAD
+  text: Engineering Lead đã approve
+  group: approval
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [standard, comprehensive, google]
+
+- id: APPROVAL-PRODUCT
+  text: Product Manager đã approve
+  group: approval
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [standard, comprehensive, pr-faq, google]
+
+- id: APPROVAL-DESIGN
+  text: Design Lead đã approve
+  group: approval
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [standard, comprehensive, google]
+
+- id: APPROVAL-LEGAL
+  text: Legal đã approve
+  group: approval
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [comprehensive, google]
+
+- id: APPROVAL-SECURITY
+  text: Security team đã approve
+  group: approval
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [comprehensive, google]
+
+- id: APPROVAL-DATA
+  text: Data team đã approve
+  group: approval
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [comprehensive, google]
+
+- id: APPROVAL-SUPPORT
+  text: Support team đã approve
+  group: approval
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [comprehensive, google]
+
+- id: APPROVAL-MARKETING
+  text: Marketing team đã approve
+  group: approval
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [comprehensive, google]
+
+- id: APPROVAL-OPERATIONS
+  text: Operations team đã approve
+  group: approval
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [comprehensive, google]
+
+- id: APPROVAL-FINAL
+  text: Final approval từ stakeholder chính
+  group: approval
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [standard, comprehensive, pr-faq, google]
+
+- id: BEFORE-DESIGN-SIGN-OFF
+  text: Design sign-off trước khi dev bắt đầu
+  group: approval
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [standard, comprehensive, google]
+
+- id: BEFORE-TECH-SIGN-OFF
+  text: Technical sign-off trước khi dev bắt đầu
+  group: approval
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [standard, comprehensive, google]
+
+- id: BEFORE-LEGAL-SIGN-OFF
+  text: Legal sign-off trước khi launch
+  group: approval
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [comprehensive, google]
+
+- id: AFTER-MONITORING
+  text: Monitoring đã setup trước khi launch
+  group: approval
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [comprehensive, google]
+
+- id: AFTER-FEEDBACK
+  text: Cơ chế feedback người dùng đã setup
+  group: approval
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [comprehensive, google]
+
+- id: AFTER-METRICS
+  text: Metrics tracking đã setup
+  group: approval
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [comprehensive, google]
+
+- id: AFTER-DOCUMENTATION
+  text: Documentation đã hoàn thành
+  group: approval
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [comprehensive, google]
+
+- id: AFTER-TRAINING
+  text: Training cho team liên quan đã hoàn thành
+  group: approval
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [comprehensive, google]
+
+- id: AFTER-RETROSPECTIVE
+  text: Retrospective đã được lên kế hoạch
+  group: approval
+  verifiability: human_only
+  on_fail: []
+  severity_default: null
+  gate: L3
+  templates: [comprehensive, google]
+
+# ── Template-specific (20 items: 8 lint, 3 cross_doc, 5 doc_presence, 4 human_only) ─
+
 - id: EXEC-SUMMARY-SUBSET
   text: Executive summary chỉ chứa fact có trong body
   group: template_specific
@@ -163,4 +662,175 @@
   detector: "fact trong summary không xuất hiện trong body"
   on_fail: [gap]
   severity_default: high
+  templates: [comprehensive, google]
+
+- id: EXEC-SUMMARY-EXISTS
+  text: Executive summary tồn tại
+  group: template_specific
+  verifiability: lint
+  detector: "thiếu section Executive Summary"
+  on_fail: [gap]
+  severity_default: high
+  templates: [comprehensive, google]
+
+- id: TOC-EXISTS
+  text: Mục lục tồn tại
+  group: template_specific
+  verifiability: lint
+  detector: "thiếu section Mục lục hoặc TOC"
+  on_fail: [gap]
+  severity_default: low
+  templates: [comprehensive]
+
+- id: APPENDIX-EXISTS
+  text: Appendix tồn tại (có thể rỗng)
+  group: template_specific
+  verifiability: lint
+  detector: "thiếu section Appendix"
+  on_fail: [gap]
+  severity_default: low
+  templates: [comprehensive]
+
+- id: CHANGE-LOG-EXISTS
+  text: Change log tồn tại
+  group: template_specific
+  verifiability: lint
+  detector: "thiếu section Change Log"
+  on_fail: [gap]
+  severity_default: medium
+  templates: [comprehensive]
+
+- id: VERSION-HISTORY
+  text: Version history được ghi nhận
+  group: template_specific
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: low
+  templates: [comprehensive]
+
+- id: PR-FAQ-PRESS-RELEASE
+  text: Press release section có nội dung
+  group: template_specific
+  verifiability: lint
+  detector: "Press release section quá ngắn hoặc rỗng"
+  on_fail: [gap]
+  severity_default: high
+  templates: [pr-faq]
+
+- id: PR-FAQ-INTERNAL-FAQ
+  text: Internal FAQ section có nội dung
+  group: template_specific
+  verifiability: lint
+  detector: "Internal FAQ section rỗng"
+  on_fail: [gap]
+  severity_default: high
+  templates: [pr-faq]
+
+- id: PR-FAQ-CUSTOMER-FAQ
+  text: Customer FAQ section có nội dung
+  group: template_specific
+  verifiability: lint
+  detector: "Customer FAQ section rỗng"
+  on_fail: [gap]
+  severity_default: high
+  templates: [pr-faq]
+
+- id: GOOGLE-OBJECTIVES
+  text: Objectives section có Goals và Non-goals
+  group: template_specific
+  verifiability: lint
+  detector: "thiếu Goals hoặc Non-goals trong Objectives"
+  on_fail: [gap]
+  severity_default: high
+  templates: [google]
+
+- id: GOOGLE-SUCCESS-CRITERIA
+  text: Success criteria có số liệu cụ thể
+  group: template_specific
+  verifiability: lint
+  detector: "Success criteria không chứa con số"
+  on_fail: [gap]
+  severity_default: high
+  templates: [google]
+
+- id: GOOGLE-USER-SCENARIO
+  text: User scenario được đánh nhãn minh hoạ
+  group: template_specific
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: low
+  templates: [google]
+
+- id: NFR-SECURITY
+  text: Security requirements được xác định
+  group: template_specific
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: medium
+  templates: [standard, comprehensive, google]
+
+- id: NFR-SCALABILITY
+  text: Scalability requirements được xác định
+  group: template_specific
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: medium
+  templates: [comprehensive, google]
+
+- id: NFR-ACCESSIBILITY
+  text: Accessibility requirements được xác định
+  group: template_specific
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: low
+  templates: [comprehensive, google]
+
+- id: NFR-RELIABILITY
+  text: Reliability requirements được xác định
+  group: template_specific
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: medium
+  templates: [comprehensive, google]
+
+- id: LEAN-SIZE-CHECK
+  text: Lean template không quá dài (< 800 từ)
+  group: template_specific
+  verifiability: lint
+  detector: "word count > 800"
+  on_fail: [gap]
+  severity_default: low
+  templates: [lean]
+
+- id: LAUNCH-PLAN-EXISTS
+  text: Launch plan section có nội dung
+  group: template_specific
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: medium
+  templates: [comprehensive, google]
+
+- id: CROSS-TEAM-DEPENDENCIES
+  text: Dependencies với team khác được xác định
+  group: template_specific
+  verifiability: cross_doc
+  detector: null
+  on_fail: [gap, not_documented]
+  severity_default: medium
+  templates: [comprehensive, google]
+
+- id: DATA-PRIVACY
+  text: Data privacy requirements được xác định
+  group: template_specific
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: medium
+  templates: [comprehensive, google]
+
+- id: INTERNATIONALIZATION
+  text: Yêu cầu quốc tế hóa (nếu applicable)
+  group: template_specific
+  verifiability: doc_presence
+  on_fail: [not_documented]
+  severity_default: low
   templates: [comprehensive, google]

@@ -10,10 +10,20 @@ export interface AgentRunInput {
     | "supervisor"
     | "review-orchestrator"
     | "ask-orchestrator"
-    | "draft-orchestrator";
+    | "draft-orchestrator"
+    | "update-orchestrator"
+    | "summarizer"
+    | "reviewer"
+    | "verifier"
+    | "question-gen"
+    | "brief-writer"
+    | "writer"
+    | "writer-update"
+    | "critic"
+    | "change-planner";
   projectToken: string;
   targetDocToken?: string;
-  freeTextGoal?: string; // used when agentName = "supervisor"
+  freeTextGoal?: string;
   extraArgs?: Record<string, unknown>;
 }
 
@@ -26,6 +36,15 @@ export interface AgentRunResult {
 export interface AgentRuntime {
   run(input: AgentRunInput): Promise<AgentRunResult>;
 }
+
+/**
+ * LLM caller function type used by orchestrators.
+ * Takes agent name + variables, returns LLM response string.
+ */
+export type LLMCaller = (
+  agentName: string,
+  vars: Record<string, string>,
+) => Promise<string>;
 
 export interface ConfigExporter {
   export(channel: "claude-code" | "codex" | "generic-mcp-export"): string;

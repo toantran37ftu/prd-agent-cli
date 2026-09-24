@@ -6,3 +6,4 @@ dist/
 *.map
 .env
 .env.local
+.commandcode/  
